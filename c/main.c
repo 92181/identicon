@@ -4,8 +4,11 @@
 #include <fcntl.h>
 #include <time.h>
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 #define GRID_WIDTH 512
-#define PIXEL_SIZE (GRID_WIDTH / 8)
+#define PIXEL_SIZE (GRID_WIDTH / 16)
 
 unsigned int mix(unsigned int h) 
 {
@@ -19,32 +22,34 @@ unsigned int mix(unsigned int h)
 }
 
 // Generate Identicon;
-char *identi_as_buffer(unsigned long seed, int border_offset, int pixel_size, int grid_width, char *color, char *background)
+char *identi_as_buffer(unsigned long seed, int border_offset, int pixel_width, int grid_width, char *color, char *background)
 {
-	unsigned int hash = seed; int s = grid_width * grid_width * 3, pixel_height = grid_width * pixel_size * 3; 
+	unsigned int z = seed; int s = grid_width * grid_width * 3, pixel_height = grid_width * pixel_width * 3; 
 	
-	grid_width *= 3; pixel_size *= 3; 
+	grid_width *= 3; pixel_width *= 3;
 
-	char *m = calloc(1, s), *n = m;
+	int border_offset_x = border_offset * 3, border_offset_y = border_offset * grid_width;
+
+  // Generate Half;
+  char *m = calloc(1, s), *n = m + border_offset_y;
 
 	if(m == 0)
 	{
 		return 0;
 	}
 
-	// Generate Half;
-	while(n < m + s - grid_width / 2)
+  while(n < m + s - border_offset_y)
 	{
 		// Every Half;
-		char *h = n;
+		char *h = n + border_offset_x;
 
 		while(h < n + grid_width / 2)
 		{
 			char raw, r = 0, g = 0, b = 0;
 
-			hash = mix(hash); raw = (hash >> 2) & 3; 
-					
-			if(raw > 2)
+			z = mix(z); raw = (z >> 2) & 6;
+
+			if(raw > 5)
 			{
 				r = color[0]; g = color[1]; b = color[2];
 			}
@@ -60,7 +65,7 @@ char *identi_as_buffer(unsigned long seed, int border_offset, int pixel_size, in
 			{
 				y = x;
 
-				while(y < x + pixel_size)
+				while(y < x + pixel_width)
 				{
 					*y = r; *(y + 1) = g; *(y + 2) = b; y += 3;
 				}
@@ -68,7 +73,7 @@ char *identi_as_buffer(unsigned long seed, int border_offset, int pixel_size, in
 				x += grid_width;
 			}
 
-			h += pixel_size;
+			h += pixel_width;
 		}
 
 		n += pixel_height;
@@ -105,16 +110,17 @@ typedef struct {
 	unsigned int info_size;
 	int width, height;
 	unsigned short planes, bit_count;
-	unsigned int compression, size_image;
+	unsigned compression;
+	unsigned size_image;
 	int x_pixels_meter, y_pixels_meter;
 	unsigned int used_colors;
 	unsigned int imp_colors;
 } BMPInfoHeader;
 #pragma pack(pop)
 
-void buffer_to_bmp(char *icon, int icon_width)
+void icon_buff_to_bmp(char *icon, int icon_width, char *path)
 {
-	int f = open("./output.bmp", O_CREAT | O_RDWR, 0644);
+	int f = open(path, O_CREAT | O_RDWR, 0644);
 
 	if(f > 0)
 	{
@@ -139,45 +145,46 @@ void buffer_to_bmp(char *icon, int icon_width)
 		write(f, &g, sizeof(BMPFileHeader));
   	write(f, &h, sizeof(BMPInfoHeader));
 
-		write(f, icon, icon_size);
+		// Switch RGB To BRG (BMP Specific);
+		char *i = icon;
+
+		while(i < icon + icon_size)
+		{
+			char c[3] = {*(i + 2), *(i + 1), *i}; write(f, c, 3);
+
+			i += 3;
+		}
 
 		close(f);
 	}
 }
 
-// Result To SVG;
-char *identi_as_svg(unsigned long seed, int pixel_size, int grid_width)
+// Result To PNG;
+void icon_buff_to_png(char *icon, int icon_width, char *path)
 {
-	/*char *m = icon;
+	stbi_write_png(path, icon_width, icon_width, 3, icon, icon_width * 3);
+}
 
-	while(m < icon + size)
-	{
-		while((m - icon) % GRID_WIDTH == 0) 
-		{
-			printf("%d ",*m); m += PIXEL_SIZE;
-		};
-
-		m += PIXEL_SIZE; printf("\n");
-	}*/
+// Result To JPG;
+void icon_buff_to_jpg(char *icon, int icon_width, char *path)
+{
+	stbi_write_jpg(path, icon_width, icon_width, 3, icon, icon_width * 3);
 }
 
 int main()
 {
 	struct timespec s, e; clock_gettime(1, &s);
 	
-	int icon_size = GRID_WIDTH * GRID_WIDTH;
-	
 	// Generate Icon As Image Buffer;
-	char color[4] = {0}, background[4] = {0, 0, 0}; color[0] = 255; color[1] = 0; color[2] = 0;
+	char color[4] = {0}, background[4] = {0, 0, 0}; color[0] = 0; color[1] = 0; color[2] = 255;
 
-	char *icon = identi_as_buffer(s.tv_nsec, PIXEL_SIZE * 2, PIXEL_SIZE, GRID_WIDTH, color, background);
+	char *icon = identi_as_buffer(s.tv_nsec, PIXEL_SIZE, PIXEL_SIZE, GRID_WIDTH, color, background);
 
 	if(icon != 0)
 	{
 		// Print Result;
-		//char *icon = identi_as_svg(s.tv_nsec, PIXEL_SIZE, GRID_WIDTH);
-
-		buffer_to_bmp(icon, GRID_WIDTH);
+		icon_buff_to_png(icon, GRID_WIDTH, "./output.png");
+		icon_buff_to_bmp(icon, GRID_WIDTH, "./output.bmp");
 
 		// Free;
 		free(icon);
